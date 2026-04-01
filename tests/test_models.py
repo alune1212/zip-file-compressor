@@ -4,6 +4,10 @@ from pathlib import Path
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from zip_compressor.models import (
     CompressionConfig,
     FailureReason,
@@ -54,6 +58,7 @@ def test_module_entrypoint_runs_without_import_error() -> None:
         [sys.executable, "-m", "zip_compressor"],
         check=False,
         capture_output=True,
+        cwd=ROOT,
         text=True,
     )
     assert completed.returncode == 0
@@ -84,3 +89,16 @@ def test_file_process_result_allows_above_target_with_failure_reason() -> None:
     )
     assert result.failure_reason is FailureReason.IMAGE_CANNOT_REACH_TARGET
     assert result.reached_target is False
+
+
+def test_file_process_result_rejects_failed_status_without_failure_reason() -> None:
+    with pytest.raises(ValueError, match="failure_reason"):
+        FileProcessResult(
+            relative_path=Path("broken.jpg"),
+            category=FileCategory.JPEG,
+            status=FileStatus.FAILED,
+            original_size_bytes=2_000_000,
+            final_size_bytes=None,
+            failure_reason=None,
+            message="save error",
+        )
