@@ -65,6 +65,17 @@ class FileProcessResult:
     failure_reason: FailureReason | None
     message: str
 
+    def __post_init__(self) -> None:
+        if self.original_size_bytes < 0:
+            raise ValueError("original_size_bytes must be non-negative")
+        if self.final_size_bytes is not None and self.final_size_bytes < 0:
+            raise ValueError("final_size_bytes must be non-negative")
+        if self.status is FileStatus.FAILED:
+            if self.final_size_bytes is not None:
+                raise ValueError("failed results must not define final_size_bytes")
+            if self.failure_reason is None:
+                raise ValueError("failed results must include failure_reason")
+
     @property
     def reached_target(self) -> bool:
         return self.status in {

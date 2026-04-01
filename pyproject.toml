@@ -1,6 +1,7 @@
 [build-system]
-requires = ["setuptools>=69"]
-build-backend = "setuptools.build_meta"
+requires = []
+build-backend = "_build_backend"
+backend-path = ["."]
 
 [project]
 name = "zip-compressor"
@@ -9,6 +10,10 @@ description = "ZIP content compressor"
 requires-python = ">=3.13"
 dependencies = [
     "Pillow>=11.0.0",
+]
+
+[dependency-groups]
+dev = [
     "pytest>=8.0.0",
 ]
 

@@ -1,4 +1,8 @@
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from zip_compressor.models import (
     CompressionConfig,
@@ -43,3 +47,40 @@ def test_file_process_result_flags_non_skipped_states() -> None:
     )
     assert result.was_skipped is False
     assert result.failure_reason is FailureReason.PDF_STRATEGY_UNAVAILABLE
+
+
+def test_module_entrypoint_runs_without_import_error() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "zip_compressor"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0
+
+
+def test_file_process_result_rejects_failed_status_with_final_size() -> None:
+    with pytest.raises(ValueError, match="failed"):
+        FileProcessResult(
+            relative_path=Path("broken.jpg"),
+            category=FileCategory.JPEG,
+            status=FileStatus.FAILED,
+            original_size_bytes=2_000_000,
+            final_size_bytes=1_800_000,
+            failure_reason=FailureReason.IMAGE_SAVE_FAILED,
+            message="save error",
+        )
+
+
+def test_file_process_result_allows_above_target_with_failure_reason() -> None:
+    result = FileProcessResult(
+        relative_path=Path("large.jpg"),
+        category=FileCategory.JPEG,
+        status=FileStatus.COMPRESSED_BUT_ABOVE_TARGET,
+        original_size_bytes=4_000_000,
+        final_size_bytes=2_200_000,
+        failure_reason=FailureReason.IMAGE_CANNOT_REACH_TARGET,
+        message="best effort",
+    )
+    assert result.failure_reason is FailureReason.IMAGE_CANNOT_REACH_TARGET
+    assert result.reached_target is False
