@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -25,9 +26,9 @@ def test_scan_files_discovers_files_recursively(tmp_path: Path) -> None:
     discovered = scan_files(tmp_path)
 
     assert [item.relative_path for item in discovered] == [
-        Path("level1/level2/deep.pdf"),
-        Path("level1/middle.jpg"),
         Path("root.png"),
+        Path("level1/middle.jpg"),
+        Path("level1/level2/deep.pdf"),
     ]
 
 
@@ -62,3 +63,22 @@ def test_scan_files_classifies_supported_and_unsupported_types(tmp_path: Path) -
         FileCategory.UNSUPPORTED,
         FileCategory.JPEG,
     ]
+
+
+def test_scan_files_skips_symlinks_outside_root(tmp_path: Path) -> None:
+    if not hasattr(os, "symlink"):
+        import pytest
+
+        pytest.skip("symlink is not supported on this platform")
+
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("external")
+
+    root_dir = tmp_path / "root"
+    root_dir.mkdir()
+    (root_dir / "inside.pdf").write_bytes(b"pdf")
+    (root_dir / "linked.txt").symlink_to(outside_file)
+
+    discovered = scan_files(root_dir)
+
+    assert [item.relative_path for item in discovered] == [Path("inside.pdf")]
