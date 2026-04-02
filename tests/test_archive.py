@@ -109,6 +109,16 @@ def test_create_zip_from_directory_raises_when_source_missing(tmp_path: Path) ->
         create_zip_from_directory(source_dir, output_zip)
 
 
+def test_create_zip_from_directory_rejects_non_directory_source(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source.txt"
+    output_zip = tmp_path / "output.zip"
+
+    source_dir.write_text("not a directory")
+
+    with pytest.raises(NotADirectoryError):
+        create_zip_from_directory(source_dir, output_zip)
+
+
 def test_create_zip_from_directory_skips_output_zip_inside_source(tmp_path: Path) -> None:
     source_dir = tmp_path / "source"
     output_zip = source_dir / "out.zip"

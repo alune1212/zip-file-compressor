@@ -66,6 +66,8 @@ def create_zip_from_directory(source_dir: Path, output_zip: Path) -> None:
     source_dir = source_dir.resolve()
     if not source_dir.exists():
         raise FileNotFoundError(source_dir)
+    if not source_dir.is_dir():
+        raise NotADirectoryError(source_dir)
 
     output_zip = output_zip.resolve(strict=False)
     output_zip.parent.mkdir(parents=True, exist_ok=True)
