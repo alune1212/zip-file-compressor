@@ -87,3 +87,9 @@ class RunSummary:
     skipped_unsupported: int
     failed_files: int
     failures: list[FileProcessResult]
+
+
+@dataclass(slots=True)
+class PipelineResult:
+    summary: RunSummary
+    results: list[FileProcessResult]
