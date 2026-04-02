@@ -27,7 +27,7 @@ def scan_files(root_dir: Path) -> list[DiscoveredFile]:
         ]
         for file_name in sorted(files):
             file_path = current_path / file_name
-            if file_path.is_symlink():
+            if file_path.is_symlink() or not file_path.is_file():
                 continue
             discovered.append(
                 DiscoveredFile(

@@ -82,3 +82,37 @@ def test_scan_files_skips_symlinks_outside_root(tmp_path: Path) -> None:
     discovered = scan_files(root_dir)
 
     assert [item.relative_path for item in discovered] == [Path("inside.pdf")]
+
+
+def test_scan_files_skips_symlink_directories(tmp_path: Path) -> None:
+    if not hasattr(os, "symlink"):
+        import pytest
+
+        pytest.skip("symlink is not supported on this platform")
+
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    (outside_dir / "leaked.pdf").write_bytes(b"pdf")
+
+    root_dir = tmp_path / "root"
+    root_dir.mkdir()
+    (root_dir / "inside.pdf").write_bytes(b"pdf")
+    (root_dir / "linked_dir").symlink_to(outside_dir, target_is_directory=True)
+
+    discovered = scan_files(root_dir)
+
+    assert [item.relative_path for item in discovered] == [Path("inside.pdf")]
+
+
+def test_scan_files_skips_special_files(tmp_path: Path) -> None:
+    if not hasattr(os, "mkfifo"):
+        import pytest
+
+        pytest.skip("special files are not supported on this platform")
+
+    fifo_path = tmp_path / "pipe"
+    os.mkfifo(fifo_path)
+
+    discovered = scan_files(tmp_path)
+
+    assert discovered == []
