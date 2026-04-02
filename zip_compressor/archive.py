@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 def _normalize_zip_member_path(member_name: str) -> Path:
@@ -23,7 +23,11 @@ def _normalize_zip_member_path(member_name: str) -> Path:
     if not normalized_parts:
         raise ValueError(f"unsafe zip member path: {member_name!r}")
 
-    if Path(member_name).is_absolute() or member_name.startswith(("/", "\\")):
+    if (
+        PurePosixPath(member_name).is_absolute()
+        or PureWindowsPath(member_name).is_absolute()
+        or member_name.startswith(("/", "\\"))
+    ):
         raise ValueError(f"unsafe zip member path: {member_name!r}")
 
     return Path(*normalized_parts)
