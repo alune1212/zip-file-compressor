@@ -10,8 +10,9 @@ def _normalize_zip_member_path(member_name: str) -> Path:
     if not member_name:
         raise ValueError("empty zip member name is not allowed")
 
+    normalized_member_name = member_name.replace("\\", "/")
     normalized_parts: list[str] = []
-    for part in PurePosixPath(member_name).parts:
+    for part in PurePosixPath(normalized_member_name).parts:
         if part == ".":
             continue
         if part == "..":
@@ -24,9 +25,8 @@ def _normalize_zip_member_path(member_name: str) -> Path:
         raise ValueError(f"unsafe zip member path: {member_name!r}")
 
     if (
-        PurePosixPath(member_name).is_absolute()
-        or PureWindowsPath(member_name).is_absolute()
-        or member_name.startswith(("/", "\\"))
+        PurePosixPath(normalized_member_name).is_absolute()
+        or PureWindowsPath(normalized_member_name).is_absolute()
     ):
         raise ValueError(f"unsafe zip member path: {member_name!r}")
 

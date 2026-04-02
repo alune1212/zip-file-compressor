@@ -38,6 +38,17 @@ def test_extract_zip_to_directory_rejects_path_traversal(tmp_path: Path) -> None
     assert not (tmp_path / "evil.txt").exists()
 
 
+def test_extract_zip_to_directory_rejects_windows_style_path_traversal(tmp_path: Path) -> None:
+    source_zip = tmp_path / "evil_windows.zip"
+    destination_dir = tmp_path / "output"
+
+    with zipfile.ZipFile(source_zip, "w") as archive:
+        archive.writestr("..\\evil.txt", "nope")
+
+    with pytest.raises(ValueError):
+        extract_zip_to_directory(source_zip, destination_dir)
+
+
 @pytest.mark.parametrize("member_name", ["/evil.txt", "\\evil.txt", "C:/abs/evil.txt"])
 def test_extract_zip_to_directory_rejects_absolute_paths(
     tmp_path: Path,
