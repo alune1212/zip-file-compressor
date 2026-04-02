@@ -64,6 +64,10 @@ def _write_directory_entry(archive: zipfile.ZipFile, relative_path: Path) -> Non
 
 def create_zip_from_directory(source_dir: Path, output_zip: Path) -> None:
     source_dir = source_dir.resolve()
+    if not source_dir.exists():
+        raise FileNotFoundError(source_dir)
+
+    output_zip = output_zip.resolve(strict=False)
     output_zip.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(output_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -82,6 +86,8 @@ def create_zip_from_directory(source_dir: Path, output_zip: Path) -> None:
 
             for file_name in sorted(files):
                 file_path = current_path / file_name
+                if file_path.resolve(strict=False) == output_zip:
+                    continue
                 if file_path.is_symlink() or not file_path.is_file():
                     continue
                 archive_path = file_path.relative_to(source_dir)

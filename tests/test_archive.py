@@ -99,3 +99,46 @@ def test_create_zip_from_directory_preserves_empty_directories(tmp_path: Path) -
         assert "empty/" in archive.namelist()
         assert "empty/child/" in archive.namelist()
         assert "nested/file.txt" in archive.namelist()
+
+
+def test_create_zip_from_directory_raises_when_source_missing(tmp_path: Path) -> None:
+    source_dir = tmp_path / "missing"
+    output_zip = tmp_path / "output.zip"
+
+    with pytest.raises(FileNotFoundError):
+        create_zip_from_directory(source_dir, output_zip)
+
+
+def test_create_zip_from_directory_skips_output_zip_inside_source(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    output_zip = source_dir / "out.zip"
+
+    (source_dir / "nested").mkdir(parents=True)
+    (source_dir / "nested" / "file.txt").write_text("content")
+
+    create_zip_from_directory(source_dir, output_zip)
+
+    with zipfile.ZipFile(output_zip) as archive:
+        assert sorted(archive.namelist()) == ["nested/", "nested/file.txt"]
+        assert "out.zip" not in archive.namelist()
+
+
+def test_create_zip_from_directory_skips_symlinks(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    output_zip = tmp_path / "output.zip"
+
+    (source_dir / "nested").mkdir(parents=True)
+    (source_dir / "nested" / "real.txt").write_text("real")
+
+    try:
+        (source_dir / "linked.txt").symlink_to(source_dir / "nested" / "real.txt")
+        (source_dir / "linked-dir").symlink_to(source_dir / "nested", target_is_directory=True)
+    except (AttributeError, NotImplementedError, OSError):
+        pytest.skip("symlinks are not supported on this platform")
+
+    create_zip_from_directory(source_dir, output_zip)
+
+    with zipfile.ZipFile(output_zip) as archive:
+        assert "nested/real.txt" in archive.namelist()
+        assert "linked.txt" not in archive.namelist()
+        assert "linked-dir/" not in archive.namelist()
