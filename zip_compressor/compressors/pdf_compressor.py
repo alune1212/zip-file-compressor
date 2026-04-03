@@ -52,7 +52,7 @@ class GhostscriptPdfCompressor:
             ]
             try:
                 subprocess.run(command, check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as exc:
+            except subprocess.CalledProcessError:
                 continue  # Try next setting instead of failing entirely
             candidate_size = candidate_path.stat().st_size
             candidate_bytes = candidate_path.read_bytes()
