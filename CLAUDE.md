@@ -53,12 +53,17 @@ zip_compressor/
 
 **PDF Compression:**
 - `NoopPdfCompressor` - Always fails (when `--pdf-strategy none`)
-- `GhostscriptPdfCompressor` - Uses Ghostscript with /printer, /ebook, /screen settings
+- `GhostscriptPdfCompressor` - Uses Ghostscript with /printer, /ebook, /screen settings (requires `gs` installed separately)
+
+## Exit Codes
+
+- `0` - Success (all files processed, no failures)
+- `1` - Partial success (some files failed or exceeded target size)
 
 ## Key Types
 
 - `FileCategory`: PDF, JPEG, PNG, UNSUPPORTED
 - `FileStatus`: ALREADY_WITHIN_TARGET, COMPRESSED_TO_TARGET, COMPRESSED_BUT_ABOVE_TARGET, SKIPPED_UNSUPPORTED, FAILED
 - `FailureReason`: Various failure reasons for each operation type
-- `CompressionConfig`: All user-configurable parameters (max_size_kb, png_allow_jpg, pdf_strategy, etc.)
+- `CompressionConfig`: All user-configurable parameters (max_size_kb, png_allow_jpg, pdf_strategy, min_image_side, min_jpeg_quality, etc.)
 - `PipelineResult`: Contains `RunSummary` and list of `FileProcessResult` per file
