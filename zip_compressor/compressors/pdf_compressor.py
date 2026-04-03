@@ -5,6 +5,8 @@ import subprocess
 
 from ..models import CompressionConfig, FailureReason, FileCategory, FileProcessResult, FileStatus
 
+GS_PDF_SETTINGS = ["/printer", "/ebook", "/screen"]
+
 
 @dataclass(slots=True)
 class NoopPdfCompressor:
@@ -32,7 +34,7 @@ class GhostscriptPdfCompressor:
         original_size = file_path.stat().st_size
         if original_size <= self.config.max_size_bytes:
             return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.ALREADY_WITHIN_TARGET, original_size, original_size, None, "already within target")
-        settings = ["/printer", "/ebook", "/screen"]
+        settings = GS_PDF_SETTINGS
         best_size = original_size
         best_output: bytes | None = None
         for setting in settings:
@@ -51,7 +53,7 @@ class GhostscriptPdfCompressor:
             try:
                 subprocess.run(command, check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as exc:
-                return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.FAILED, original_size, None, FailureReason.PDF_COMPRESSION_FAILED, exc.stderr.strip() or "ghostscript failed")
+                continue  # Try next setting instead of failing entirely
             candidate_size = candidate_path.stat().st_size
             candidate_bytes = candidate_path.read_bytes()
             candidate_path.unlink(missing_ok=True)

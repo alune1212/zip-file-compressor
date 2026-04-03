@@ -13,14 +13,38 @@ def configure_logging(log_file: Path | None = None) -> None:
 
 
 def build_summary(results: list[FileProcessResult]) -> RunSummary:
-    failures = [item for item in results if item.status is FileStatus.FAILED or item.status is FileStatus.COMPRESSED_BUT_ABOVE_TARGET]
+    failures: list[FileProcessResult] = []
+    total_files = len(results)
+    supported_files = 0
+    already_within_target = 0
+    compressed_to_target = 0
+    compressed_but_above_target = 0
+    skipped_unsupported = 0
+    failed_files = 0
+
+    for item in results:
+        if item.category is not FileCategory.UNSUPPORTED:
+            supported_files += 1
+        if item.status is FileStatus.ALREADY_WITHIN_TARGET:
+            already_within_target += 1
+        elif item.status is FileStatus.COMPRESSED_TO_TARGET:
+            compressed_to_target += 1
+        elif item.status is FileStatus.COMPRESSED_BUT_ABOVE_TARGET:
+            compressed_but_above_target += 1
+            failures.append(item)
+        elif item.status is FileStatus.SKIPPED_UNSUPPORTED:
+            skipped_unsupported += 1
+        elif item.status is FileStatus.FAILED:
+            failed_files += 1
+            failures.append(item)
+
     return RunSummary(
-        total_files=len(results),
-        supported_files=sum(1 for item in results if item.category is not FileCategory.UNSUPPORTED),
-        already_within_target=sum(1 for item in results if item.status is FileStatus.ALREADY_WITHIN_TARGET),
-        compressed_to_target=sum(1 for item in results if item.status is FileStatus.COMPRESSED_TO_TARGET),
-        compressed_but_above_target=sum(1 for item in results if item.status is FileStatus.COMPRESSED_BUT_ABOVE_TARGET),
-        skipped_unsupported=sum(1 for item in results if item.status is FileStatus.SKIPPED_UNSUPPORTED),
-        failed_files=sum(1 for item in results if item.status is FileStatus.FAILED),
+        total_files=total_files,
+        supported_files=supported_files,
+        already_within_target=already_within_target,
+        compressed_to_target=compressed_to_target,
+        compressed_but_above_target=compressed_but_above_target,
+        skipped_unsupported=skipped_unsupported,
+        failed_files=failed_files,
         failures=failures,
     )

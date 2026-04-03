@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 import zipfile
 
 
@@ -21,7 +22,7 @@ def extract_zip_to_directory(source_zip: Path, destination_dir: Path) -> None:
                 continue
             target_path.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(member, "r") as input_handle, target_path.open("wb") as output_handle:
-                output_handle.write(input_handle.read())
+                shutil.copyfileobj(input_handle, output_handle)
 
 
 def create_zip_from_directory(source_dir: Path, output_zip: Path) -> None:
