@@ -12,7 +12,7 @@ ZIP File Compressor - A CLI tool that extracts ZIP archives, compresses PDF/JPG/
 # Install dependencies (creates .venv)
 uv venv && uv pip install -r requirements.txt
 
-# Run tests
+# Run tests (2 PDF tests skip if ghostscript not installed)
 PYTHONPATH=. uv run pytest
 
 # Run single test file
@@ -54,6 +54,7 @@ zip_compressor/
 **PDF Compression:**
 - `NoopPdfCompressor` - Always fails (when `--pdf-strategy none`)
 - `GhostscriptPdfCompressor` - Uses Ghostscript with /printer, /ebook, /screen settings (requires `gs` installed separately)
+- Ghostscript PDF→JPG conversion: `-sDEVICE=jpeg -r150 -dJPEGQ=85 -sOutputFile={stem}_page_%d.jpg`
 
 ## Exit Codes
 
@@ -63,7 +64,7 @@ zip_compressor/
 ## Key Types
 
 - `FileCategory`: PDF, JPEG, PNG, UNSUPPORTED
-- `FileStatus`: ALREADY_WITHIN_TARGET, COMPRESSED_TO_TARGET, COMPRESSED_BUT_ABOVE_TARGET, SKIPPED_UNSUPPORTED, FAILED
+- `FileStatus`: ALREADY_WITHIN_TARGET, COMPRESSED_TO_TARGET, COMPRESSED_BUT_ABOVE_TARGET, SKIPPED_UNSUPPORTED, FAILED (NOTE: `SUCCESS` does not exist)
 - `FailureReason`: Various failure reasons for each operation type
 - `CompressionConfig`: All user-configurable parameters (max_size_kb, png_allow_jpg, pdf_strategy, min_image_side, min_jpeg_quality, etc.)
 - `PipelineResult`: Contains `RunSummary` and list of `FileProcessResult` per file
