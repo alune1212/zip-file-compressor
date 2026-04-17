@@ -103,6 +103,9 @@ class GhostscriptPdfCompressor:
         # Find generated JPG files
         jpg_files = sorted(file_path.parent.glob(f"{stem}_page_*.jpg"))
         if not jpg_files:
+            # Clean up any orphaned JPG files that gs might have produced
+            for orphaned in file_path.parent.glob(f"{stem}_page_*.jpg"):
+                orphaned.unlink(missing_ok=True)
             return FileProcessResult(
                 relative_path,
                 FileCategory.PDF,
@@ -113,14 +116,11 @@ class GhostscriptPdfCompressor:
                 "no JPG files produced from PDF",
             )
 
-        # Delete original PDF
-        file_path.unlink(missing_ok=True)
-
         # Calculate total size of all JPG files
         total_jpg_size = sum(f.stat().st_size for f in jpg_files)
         first_jpg_relative = relative_path.parent / jpg_files[0].name
 
-        return FileProcessResult(
+        result = FileProcessResult(
             first_jpg_relative,
             FileCategory.JPEG,
             FileStatus.SUCCESS,
@@ -129,6 +129,11 @@ class GhostscriptPdfCompressor:
             None,
             f"PDF converted to {len(jpg_files)} JPG pages",
         )
+
+        # Delete original PDF only after confirming conversion was successful
+        file_path.unlink(missing_ok=True)
+
+        return result
 
 
 def detect_ghostscript() -> str | None:
