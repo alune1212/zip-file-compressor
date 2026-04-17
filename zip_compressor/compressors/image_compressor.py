@@ -36,6 +36,14 @@ def _compress_png(file_path: Path, relative_path: Path, original_size: int, conf
     with Image.open(file_path) as source:
         base_image = source.copy()
 
+    if config.force_jpg:
+        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=70)
+        new_path = file_path.with_suffix(".jpg")
+        if file_path.exists():
+            file_path.unlink()
+        new_path.write_bytes(jpeg_bytes)
+        return FileProcessResult(relative_path.with_suffix(".jpg"), FileCategory.PNG, FileStatus.COMPRESSED_TO_TARGET if len(jpeg_bytes) <= config.max_size_bytes else FileStatus.COMPRESSED_BUT_ABOVE_TARGET, original_size, len(jpeg_bytes), None if len(jpeg_bytes) <= config.max_size_bytes else FailureReason.IMAGE_CANNOT_REACH_TARGET, "force jpg conversion")
+
     best_bytes: bytes | None = None
     best_size = original_size
 
