@@ -123,7 +123,7 @@ class GhostscriptPdfCompressor:
         result = FileProcessResult(
             first_jpg_relative,
             FileCategory.JPEG,
-            FileStatus.SUCCESS,
+            FileStatus.COMPRESSED_TO_TARGET,
             original_size,
             total_jpg_size,
             None,
