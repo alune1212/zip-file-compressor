@@ -41,6 +41,7 @@ class CompressionConfig:
     log_file: Path | None = None
     min_image_side: int = 800
     min_jpeg_quality: int = 35
+    force_jpg: bool = False
 
     @property
     def max_size_bytes(self) -> int:

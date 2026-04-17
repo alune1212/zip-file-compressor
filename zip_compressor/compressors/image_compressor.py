@@ -36,6 +36,24 @@ def _compress_png(file_path: Path, relative_path: Path, original_size: int, conf
     with Image.open(file_path) as source:
         base_image = source.copy()
 
+    if config.force_jpg:
+        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=config.min_jpeg_quality)
+        new_path = file_path.with_suffix(".jpg")
+        generated_unique_name = False
+        if new_path.exists():
+            # Avoid overwriting existing JPG - generate unique name
+            counter = 1
+            while new_path.exists():
+                new_path = file_path.parent / f"{file_path.stem}_{counter}.jpg"
+                counter += 1
+            generated_unique_name = True
+        if file_path.exists():
+            file_path.unlink()
+        new_path.write_bytes(jpeg_bytes)
+        # Use actual output path as relative_path
+        result_relative_path = new_path.relative_to(file_path.parent) if generated_unique_name else relative_path.with_suffix(".jpg")
+        return FileProcessResult(result_relative_path, FileCategory.PNG, FileStatus.COMPRESSED_TO_TARGET if len(jpeg_bytes) <= config.max_size_bytes else FileStatus.COMPRESSED_BUT_ABOVE_TARGET, original_size, len(jpeg_bytes), None if len(jpeg_bytes) <= config.max_size_bytes else FailureReason.IMAGE_CANNOT_REACH_TARGET, "force jpg conversion")
+
     best_bytes: bytes | None = None
     best_size = original_size
 
@@ -56,7 +74,7 @@ def _compress_png(file_path: Path, relative_path: Path, original_size: int, conf
                     return FileProcessResult(relative_path, FileCategory.PNG, FileStatus.COMPRESSED_TO_TARGET, original_size, candidate_size, None, f"png optimized scale={scale} level={compress_level} colors={colors}")
 
     if config.png_allow_jpg and not _has_transparency(base_image):
-        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=70)
+        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=config.min_jpeg_quality)
         if len(jpeg_bytes) < best_size:
             new_path = file_path.with_suffix(".jpg")
             if file_path.exists():
