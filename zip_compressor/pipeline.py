@@ -70,6 +70,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-file", type=Path)
     parser.add_argument("--min-image-side", type=int, default=800)
     parser.add_argument("--min-jpeg-quality", type=int, default=35)
+    parser.add_argument("--force-jpg", action="store_true")
     return parser
 
 
@@ -85,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         log_file=args.log_file,
         min_image_side=args.min_image_side,
         min_jpeg_quality=args.min_jpeg_quality,
+        force_jpg=args.force_jpg,
     )
     configure_logging(config.log_file)
     pipeline_result = run_pipeline(config)
