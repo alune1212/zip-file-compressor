@@ -32,6 +32,11 @@ class GhostscriptPdfCompressor:
 
     def compress(self, file_path: Path, relative_path: Path) -> FileProcessResult:
         original_size = file_path.stat().st_size
+
+        # Handle force_jpg=True: convert PDF pages to JPEG images
+        if self.config.force_jpg:
+            return self._convert_pdf_to_jpg(file_path, relative_path, original_size)
+
         if original_size <= self.config.max_size_bytes:
             return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.ALREADY_WITHIN_TARGET, original_size, original_size, None, "already within target")
         settings = GS_PDF_SETTINGS
@@ -67,6 +72,63 @@ class GhostscriptPdfCompressor:
             file_path.write_bytes(best_output)
             return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.COMPRESSED_BUT_ABOVE_TARGET, original_size, best_size, FailureReason.PDF_COMPRESSION_FAILED, "best effort PDF compression did not reach target")
         return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.FAILED, original_size, None, FailureReason.PDF_COMPRESSION_FAILED, "no PDF output produced")
+
+    def _convert_pdf_to_jpg(self, file_path: Path, relative_path: Path, original_size: int) -> FileProcessResult:
+        """Convert PDF pages to JPEG images using Ghostscript."""
+        stem = file_path.stem
+        output_pattern = file_path.parent / f"{stem}_page_%d.jpg"
+        command = [
+            self.executable,
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-sDEVICE=jpeg",
+            "-r150",
+            "-dJPEGQ=85",
+            f"-sOutputFile={output_pattern}",
+            str(file_path),
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return FileProcessResult(
+                relative_path,
+                FileCategory.PDF,
+                FileStatus.FAILED,
+                original_size,
+                None,
+                FailureReason.PDF_COMPRESSION_FAILED,
+                "ghostscript failed to convert PDF to JPG",
+            )
+
+        # Find generated JPG files
+        jpg_files = sorted(file_path.parent.glob(f"{stem}_page_*.jpg"))
+        if not jpg_files:
+            return FileProcessResult(
+                relative_path,
+                FileCategory.PDF,
+                FileStatus.FAILED,
+                original_size,
+                None,
+                FailureReason.PDF_COMPRESSION_FAILED,
+                "no JPG files produced from PDF",
+            )
+
+        # Delete original PDF
+        file_path.unlink(missing_ok=True)
+
+        # Calculate total size of all JPG files
+        total_jpg_size = sum(f.stat().st_size for f in jpg_files)
+        first_jpg_relative = relative_path.parent / jpg_files[0].name
+
+        return FileProcessResult(
+            first_jpg_relative,
+            FileCategory.JPEG,
+            FileStatus.SUCCESS,
+            original_size,
+            total_jpg_size,
+            None,
+            f"PDF converted to {len(jpg_files)} JPG pages",
+        )
 
 
 def detect_ghostscript() -> str | None:
