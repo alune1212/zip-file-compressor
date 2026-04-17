@@ -36,11 +36,15 @@ def test_force_jpg_end_to_end(tmp_path: Path) -> None:
     # Verify output ZIP exists
     assert output_zip.exists()
 
+    # Verify result summary
+    assert result.summary.failed_files == 0
+    assert result.summary.total_files == 2
+    assert any(str(r.relative_path).endswith(".jpg") for r in result.results)
+
     # Verify output ZIP contains only .jpg files (no PNG)
     with zipfile.ZipFile(output_zip, "r") as zf:
         names = zf.namelist()
-        for name in names:
-            if name.endswith((".png", ".pdf")):
-                assert False, f"Found non-JPG file: {name}"
+        non_jpg_files = [n for n in names if n.endswith((".png", ".pdf"))]
+        assert not non_jpg_files, f"Found non-JPG files: {non_jpg_files}"
         # Should have test.png converted to .jpg and test.jpg
-        assert any("test.jpg" in n for n in names)
+        assert "test.jpg" in names, f"Expected test.jpg in {names}"
