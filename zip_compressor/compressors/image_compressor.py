@@ -37,7 +37,7 @@ def _compress_png(file_path: Path, relative_path: Path, original_size: int, conf
         base_image = source.copy()
 
     if config.force_jpg:
-        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=70)
+        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=config.min_jpeg_quality)
         new_path = file_path.with_suffix(".jpg")
         if file_path.exists():
             file_path.unlink()
@@ -64,7 +64,7 @@ def _compress_png(file_path: Path, relative_path: Path, original_size: int, conf
                     return FileProcessResult(relative_path, FileCategory.PNG, FileStatus.COMPRESSED_TO_TARGET, original_size, candidate_size, None, f"png optimized scale={scale} level={compress_level} colors={colors}")
 
     if config.png_allow_jpg and not _has_transparency(base_image):
-        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=70)
+        jpeg_bytes = _save_jpeg_candidate(base_image.convert("RGB"), quality=config.min_jpeg_quality)
         if len(jpeg_bytes) < best_size:
             new_path = file_path.with_suffix(".jpg")
             if file_path.exists():
