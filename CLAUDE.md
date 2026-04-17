@@ -67,3 +67,8 @@ zip_compressor/
 - `FailureReason`: Various failure reasons for each operation type
 - `CompressionConfig`: All user-configurable parameters (max_size_kb, png_allow_jpg, pdf_strategy, min_image_side, min_jpeg_quality, etc.)
 - `PipelineResult`: Contains `RunSummary` and list of `FileProcessResult` per file
+
+## Gotchas
+
+- **Ghostscript 为 PDF 压缩必需**: `gs` 必须单独安装 (macOS: `brew install ghostscript`)
+- **PNG→JPEG 转换为有损转换**: 当 `png_allow_jpg=True` 时，透明度会被丢弃
