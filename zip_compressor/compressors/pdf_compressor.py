@@ -90,6 +90,9 @@ class GhostscriptPdfCompressor:
         try:
             subprocess.run(command, check=True, capture_output=True, text=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
+            # Clean up any orphaned JPG files that gs might have produced
+            for orphaned in file_path.parent.glob(f"{stem}_page_*.jpg"):
+                orphaned.unlink(missing_ok=True)
             return FileProcessResult(
                 relative_path,
                 FileCategory.PDF,
@@ -103,9 +106,6 @@ class GhostscriptPdfCompressor:
         # Find generated JPG files
         jpg_files = sorted(file_path.parent.glob(f"{stem}_page_*.jpg"))
         if not jpg_files:
-            # Clean up any orphaned JPG files that gs might have produced
-            for orphaned in file_path.parent.glob(f"{stem}_page_*.jpg"):
-                orphaned.unlink(missing_ok=True)
             return FileProcessResult(
                 relative_path,
                 FileCategory.PDF,
