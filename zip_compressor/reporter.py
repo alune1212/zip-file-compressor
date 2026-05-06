@@ -1,23 +1,39 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from zip_compressor.models import FileProcessResult, FileStatus, RunSummary
 
 
 def configure_logging(log_file: Path | None = None) -> None:
-    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    existing_handlers = root_logger.handlers
+
+    if not any(
+        isinstance(handler, logging.StreamHandler)
+        and getattr(handler, "stream", None) is sys.stderr
+        for handler in existing_handlers
+    ):
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
+
     if log_file is not None:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=handlers,
-        force=True,
-    )
+        resolved_log_file = log_file.resolve(strict=False)
+        if not any(
+            isinstance(handler, logging.FileHandler)
+            and Path(handler.baseFilename).resolve(strict=False) == resolved_log_file
+            for handler in existing_handlers
+        ):
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
 
 
 def build_summary(results: list[FileProcessResult]) -> RunSummary:
@@ -45,6 +61,6 @@ def build_summary(results: list[FileProcessResult]) -> RunSummary:
         skipped_unsupported=sum(
             1 for result in results if result.status is FileStatus.SKIPPED_UNSUPPORTED
         ),
-        failed_files=len(failures),
+        failed_files=sum(1 for result in results if result.status is FileStatus.FAILED),
         failures=failures,
     )
