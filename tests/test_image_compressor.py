@@ -2,6 +2,7 @@ import io
 import sys
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,3 +108,35 @@ def test_hard_target_can_return_compressed_but_above_target(tmp_path: Path) -> N
     assert result.final_size_bytes < original_size
     assert result.final_size_bytes > config.max_size_bytes
     assert file_path.stat().st_size == result.final_size_bytes
+
+
+def test_larger_only_candidates_do_not_overwrite_original_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_path = tmp_path / "worse.jpg"
+    original_size = _write_jpeg(file_path, size=(1800, 1800), quality=95)
+    original_bytes = file_path.read_bytes()
+    config = _build_config(tmp_path, max_size_kb=max(1, (original_size // 1024) - 10), min_image_side=1200)
+
+    import zip_compressor.compressors.image_compressor as image_compressor
+
+    larger_candidate = original_bytes + b"still-larger"
+
+    monkeypatch.setattr(
+        image_compressor,
+        "_find_best_jpeg_candidate",
+        lambda source_image, config: (larger_candidate, False),
+    )
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("worse.jpg"),
+        category=FileCategory.JPEG,
+        config=config,
+    )
+
+    assert result.status is FileStatus.FAILED
+    assert result.failure_reason is FailureReason.IMAGE_CANNOT_REACH_TARGET
+    assert result.final_size_bytes is None
+    assert file_path.read_bytes() == original_bytes

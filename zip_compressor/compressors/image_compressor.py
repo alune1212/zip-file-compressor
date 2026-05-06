@@ -83,6 +83,17 @@ def compress_image_file(
             message="no jpeg candidate could be encoded",
         )
 
+    if len(best_bytes) >= original_size:
+        return FileProcessResult(
+            relative_path=relative_path,
+            category=category,
+            status=FileStatus.FAILED,
+            original_size_bytes=original_size,
+            final_size_bytes=None,
+            failure_reason=FailureReason.IMAGE_CANNOT_REACH_TARGET,
+            message="jpeg candidates did not reduce file size",
+        )
+
     file_path.write_bytes(best_bytes)
     final_size = len(best_bytes)
     if reached_target:
