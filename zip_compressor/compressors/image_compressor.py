@@ -15,6 +15,8 @@ from zip_compressor.models import (
 
 _JPEG_QUALITY_STEPS = (95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35)
 _SCALE_STEPS = (1.0, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6)
+_MIN_ALLOWED_JPEG_QUALITY = 5
+_MAX_ALLOWED_JPEG_QUALITY = 95
 
 
 def compress_image_file(
@@ -28,10 +30,10 @@ def compress_image_file(
         return FileProcessResult(
             relative_path=relative_path,
             category=category,
-            status=FileStatus.SKIPPED_UNSUPPORTED,
+            status=FileStatus.FAILED,
             original_size_bytes=original_size,
             final_size_bytes=None,
-            failure_reason=None,
+            failure_reason=FailureReason.UNSUPPORTED_TYPE,
             message=f"unsupported image category: {category.value}",
         )
 
@@ -94,7 +96,19 @@ def compress_image_file(
             message="jpeg candidates did not reduce file size",
         )
 
-    file_path.write_bytes(best_bytes)
+    try:
+        file_path.write_bytes(best_bytes)
+    except OSError as exc:
+        return FileProcessResult(
+            relative_path=relative_path,
+            category=category,
+            status=FileStatus.FAILED,
+            original_size_bytes=original_size,
+            final_size_bytes=None,
+            failure_reason=FailureReason.IMAGE_SAVE_FAILED,
+            message=f"failed to write jpeg: {exc}",
+        )
+
     final_size = len(best_bytes)
     if reached_target:
         return FileProcessResult(
@@ -160,7 +174,14 @@ def _eligible_scales(image_size: tuple[int, int], min_image_side: int) -> list[f
 
 
 def _eligible_qualities(min_quality: int) -> list[int]:
-    return [quality for quality in _JPEG_QUALITY_STEPS if quality >= min_quality]
+    clamped_min_quality = min(max(min_quality, _MIN_ALLOWED_JPEG_QUALITY), _MAX_ALLOWED_JPEG_QUALITY)
+    qualities = [quality for quality in _JPEG_QUALITY_STEPS if quality >= clamped_min_quality]
+    if qualities:
+        last_quality = qualities[-1]
+        if last_quality != clamped_min_quality:
+            qualities.append(clamped_min_quality)
+        return qualities
+    return [clamped_min_quality]
 
 
 def _resize_image(source_image: Image.Image, scale: float) -> Image.Image:

@@ -140,3 +140,117 @@ def test_larger_only_candidates_do_not_overwrite_original_file(
     assert result.failure_reason is FailureReason.IMAGE_CANNOT_REACH_TARGET
     assert result.final_size_bytes is None
     assert file_path.read_bytes() == original_bytes
+
+
+def test_min_jpeg_quality_below_default_allows_more_aggressive_attempts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_path = tmp_path / "quality20.jpg"
+    original_size = _write_jpeg(file_path, size=(1600, 1600), quality=95)
+    config = _build_config(tmp_path, max_size_kb=max(1, (original_size // 1024) - 50))
+    config.min_jpeg_quality = 20
+
+    import zip_compressor.compressors.image_compressor as image_compressor
+
+    qualities_seen: list[int] = []
+    target_size = config.max_size_bytes
+
+    def tracking_encode(image: Image.Image, quality: int) -> bytes:
+        qualities_seen.append(quality)
+        if quality <= 20:
+            return b"x" * max(1, target_size - 1)
+        return b"x" * (target_size + 100)
+
+    monkeypatch.setattr(image_compressor, "_encode_jpeg", tracking_encode)
+
+    compress_image_file(
+        file_path=file_path,
+        relative_path=Path("quality20.jpg"),
+        category=FileCategory.JPEG,
+        config=config,
+    )
+
+    assert qualities_seen
+    assert min(qualities_seen) <= 20
+
+
+def test_min_jpeg_quality_above_95_does_not_report_empty_ladder_as_save_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_path = tmp_path / "quality96.jpg"
+    original_size = _write_jpeg(file_path, size=(1500, 1500), quality=95)
+    config = _build_config(tmp_path, max_size_kb=max(1, (original_size // 1024) - 20))
+    config.min_jpeg_quality = 96
+
+    import zip_compressor.compressors.image_compressor as image_compressor
+    qualities_seen: list[int] = []
+
+    monkeypatch.setattr(
+        image_compressor,
+        "_encode_jpeg",
+        lambda image, quality: qualities_seen.append(quality) or b"x" * max(1, original_size - 100),
+    )
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("quality96.jpg"),
+        category=FileCategory.JPEG,
+        config=config,
+    )
+
+    assert qualities_seen
+    assert set(qualities_seen) == {95}
+    assert result.failure_reason is not FailureReason.IMAGE_SAVE_FAILED
+
+
+def test_write_failure_returns_structured_image_save_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_path = tmp_path / "write-fail.jpg"
+    original_size = _write_jpeg(file_path, size=(1800, 1800), quality=95)
+    config = _build_config(tmp_path, max_size_kb=max(1, (original_size // 1024) - 10))
+
+    import zip_compressor.compressors.image_compressor as image_compressor
+
+    smaller_candidate = b"x" * max(1, original_size - 100)
+    monkeypatch.setattr(
+        image_compressor,
+        "_find_best_jpeg_candidate",
+        lambda source_image, config: (smaller_candidate, True),
+    )
+    monkeypatch.setattr(
+        Path,
+        "write_bytes",
+        lambda self, data: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("write-fail.jpg"),
+        category=FileCategory.JPEG,
+        config=config,
+    )
+
+    assert result.status is FileStatus.FAILED
+    assert result.failure_reason is FailureReason.IMAGE_SAVE_FAILED
+    assert result.final_size_bytes is None
+
+
+def test_non_jpeg_category_returns_unsupported_type_failure(tmp_path: Path) -> None:
+    file_path = tmp_path / "image.png"
+    file_path.write_bytes(b"png-bytes")
+    config = _build_config(tmp_path, max_size_kb=1)
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("image.png"),
+        category=FileCategory.PNG,
+        config=config,
+    )
+
+    assert result.status is FileStatus.FAILED
+    assert result.failure_reason is FailureReason.UNSUPPORTED_TYPE
+    assert result.final_size_bytes is None
