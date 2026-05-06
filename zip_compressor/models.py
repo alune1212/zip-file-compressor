@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -86,3 +86,15 @@ class FileProcessResult:
     @property
     def was_skipped(self) -> bool:
         return self.status is FileStatus.SKIPPED_UNSUPPORTED
+
+
+@dataclass(slots=True)
+class RunSummary:
+    total_files: int
+    supported_files: int
+    already_within_target: int
+    compressed_to_target: int
+    compressed_but_above_target: int
+    skipped_unsupported: int
+    failed_files: int
+    failures: list[FileProcessResult] = field(default_factory=list)
