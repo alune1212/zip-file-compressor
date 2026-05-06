@@ -167,6 +167,7 @@ def _compress_png_file(
     best_bytes = best_png_bytes
     output_path = file_path
     output_relative_path = relative_path
+    output_category = FileCategory.PNG
     output_message = "png compressed, but target size could not be reached"
     reached_target = png_reached_target
 
@@ -190,6 +191,7 @@ def _compress_png_file(
             best_bytes = best_jpeg_bytes
             output_path = file_path.with_suffix(".jpg")
             output_relative_path = relative_path.with_suffix(".jpg")
+            output_category = FileCategory.JPEG
             output_message = "png converted to jpeg, but target size could not be reached"
             reached_target = jpeg_reached_target
             if jpeg_reached_target:
@@ -222,7 +224,7 @@ def _compress_png_file(
     except OSError as exc:
         return FileProcessResult(
             relative_path=output_relative_path,
-            category=FileCategory.PNG,
+            category=output_category,
             status=FileStatus.FAILED,
             original_size_bytes=original_size,
             final_size_bytes=None,
@@ -234,7 +236,7 @@ def _compress_png_file(
     if reached_target:
         return FileProcessResult(
             relative_path=output_relative_path,
-            category=FileCategory.PNG,
+            category=output_category,
             status=FileStatus.COMPRESSED_TO_TARGET,
             original_size_bytes=original_size,
             final_size_bytes=final_size,
@@ -248,7 +250,7 @@ def _compress_png_file(
 
     return FileProcessResult(
         relative_path=output_relative_path,
-        category=FileCategory.PNG,
+        category=output_category,
         status=FileStatus.COMPRESSED_BUT_ABOVE_TARGET,
         original_size_bytes=original_size,
         final_size_bytes=final_size,
@@ -396,9 +398,27 @@ def _image_uses_transparency(image: Image.Image) -> bool:
 
 def _write_image_result(original_path: Path, output_path: Path, data: bytes) -> Path:
     _atomic_write_bytes(output_path, data)
-    if output_path != original_path:
-        original_path.unlink()
+    if output_path == original_path:
+        return output_path
+
+    try:
+        _delete_original_after_replacement(original_path, output_path)
+    except OSError:
+        _cleanup_replacement_after_failed_delete(output_path)
+        raise
+
     return output_path
+
+
+def _delete_original_after_replacement(original_path: Path, replacement_path: Path) -> None:
+    original_path.unlink()
+
+
+def _cleanup_replacement_after_failed_delete(replacement_path: Path) -> None:
+    try:
+        replacement_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:

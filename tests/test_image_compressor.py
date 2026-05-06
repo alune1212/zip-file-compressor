@@ -333,6 +333,8 @@ def test_png_without_alpha_can_convert_to_jpg_when_enabled(tmp_path: Path) -> No
     converted_path = tmp_path / "convertible.jpg"
     assert result.status is FileStatus.COMPRESSED_TO_TARGET
     assert result.relative_path == Path("convertible.jpg")
+    assert result.relative_path.suffix == ".jpg"
+    assert result.category is FileCategory.JPEG
     assert converted_path.exists()
     assert not file_path.exists()
     assert result.final_size_bytes is not None
@@ -379,6 +381,41 @@ def test_corrupted_png_returns_failed_with_corrupted_reason(tmp_path: Path) -> N
     assert result.status is FileStatus.FAILED
     assert result.failure_reason is FailureReason.CORRUPTED_FILE
     assert result.final_size_bytes is None
+
+
+def test_png_to_jpg_delete_failure_rolls_back_new_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file_path = tmp_path / "rollback.png"
+    original_size = _write_png(file_path, size=(1800, 1800), with_alpha=False)
+    original_bytes = file_path.read_bytes()
+    config = _build_config(tmp_path, max_size_kb=320, min_image_side=700)
+    config.png_allow_jpg = True
+
+    import zip_compressor.compressors.image_compressor as image_compressor
+
+    def failing_delete(original_path: Path, replacement_path: Path) -> None:
+        raise OSError("cannot remove original png")
+
+    monkeypatch.setattr(
+        image_compressor,
+        "_delete_original_after_replacement",
+        failing_delete,
+    )
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("rollback.png"),
+        category=FileCategory.PNG,
+        config=config,
+    )
+
+    converted_path = tmp_path / "rollback.jpg"
+    assert result.status is FileStatus.FAILED
+    assert result.failure_reason is FailureReason.IMAGE_SAVE_FAILED
+    assert result.final_size_bytes is None
+    assert result.relative_path == Path("rollback.jpg")
+    assert file_path.exists()
+    assert file_path.read_bytes() == original_bytes
+    assert not converted_path.exists()
 
 
 def test_unsupported_category_still_raises_value_error(tmp_path: Path) -> None:
