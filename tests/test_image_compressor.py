@@ -35,6 +35,27 @@ def _write_jpeg(
     return path.stat().st_size
 
 
+def _write_png(
+    path: Path,
+    *,
+    size: tuple[int, int],
+    with_alpha: bool = False,
+) -> int:
+    base = Image.effect_noise(size, 100.0).convert("L")
+    channels = [
+        base,
+        base.point(lambda value: (value * 3) % 256),
+        base.point(lambda value: (value * 5) % 256),
+    ]
+    if with_alpha:
+        alpha = Image.linear_gradient("L").resize(size)
+        image = Image.merge("RGBA", (*channels, alpha))
+    else:
+        image = Image.merge("RGB", tuple(channels))
+    image.save(path, format="PNG", optimize=False, compress_level=0)
+    return path.stat().st_size
+
+
 def test_small_jpeg_returns_already_within_target(tmp_path: Path) -> None:
     file_path = tmp_path / "small.jpg"
     original_size = _write_jpeg(file_path, size=(120, 120), quality=80)
@@ -273,15 +294,102 @@ def test_write_failure_returns_structured_image_save_error(
     assert result.final_size_bytes is None
 
 
-def test_non_jpeg_category_returns_unsupported_type_failure(tmp_path: Path) -> None:
+def test_large_png_is_processed_and_stays_png_by_default(tmp_path: Path) -> None:
     file_path = tmp_path / "image.png"
-    file_path.write_bytes(b"png-bytes")
+    original_size = _write_png(file_path, size=(1800, 1800))
+    config = _build_config(tmp_path, max_size_kb=max(1, (original_size // 1024) - 100), min_image_side=700)
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("image.png"),
+        category=FileCategory.PNG,
+        config=config,
+    )
+
+    assert result.status in {
+        FileStatus.COMPRESSED_TO_TARGET,
+        FileStatus.COMPRESSED_BUT_ABOVE_TARGET,
+    }
+    assert result.relative_path.suffix == ".png"
+    assert file_path.exists()
+    assert result.final_size_bytes is not None
+    assert result.final_size_bytes < original_size
+    assert file_path.stat().st_size == result.final_size_bytes
+
+
+def test_png_without_alpha_can_convert_to_jpg_when_enabled(tmp_path: Path) -> None:
+    file_path = tmp_path / "convertible.png"
+    original_size = _write_png(file_path, size=(1800, 1800), with_alpha=False)
+    config = _build_config(tmp_path, max_size_kb=320, min_image_side=700)
+    config.png_allow_jpg = True
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("convertible.png"),
+        category=FileCategory.PNG,
+        config=config,
+    )
+
+    converted_path = tmp_path / "convertible.jpg"
+    assert result.status is FileStatus.COMPRESSED_TO_TARGET
+    assert result.relative_path == Path("convertible.jpg")
+    assert converted_path.exists()
+    assert not file_path.exists()
+    assert result.final_size_bytes is not None
+    assert result.final_size_bytes < original_size
+    assert converted_path.stat().st_size == result.final_size_bytes
+
+
+def test_png_with_alpha_does_not_convert_to_jpg_even_when_enabled(tmp_path: Path) -> None:
+    file_path = tmp_path / "alpha.png"
+    original_size = _write_png(file_path, size=(1800, 1800), with_alpha=True)
+    config = _build_config(tmp_path, max_size_kb=max(1, (original_size // 1024) - 100), min_image_side=700)
+    config.png_allow_jpg = True
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("alpha.png"),
+        category=FileCategory.PNG,
+        config=config,
+    )
+
+    assert result.status in {
+        FileStatus.COMPRESSED_TO_TARGET,
+        FileStatus.COMPRESSED_BUT_ABOVE_TARGET,
+    }
+    assert result.relative_path == Path("alpha.png")
+    assert file_path.exists()
+    assert not (tmp_path / "alpha.jpg").exists()
+    assert result.final_size_bytes is not None
+    assert result.final_size_bytes < original_size
+
+
+def test_corrupted_png_returns_failed_with_corrupted_reason(tmp_path: Path) -> None:
+    file_path = tmp_path / "broken.png"
+    file_path.write_bytes(b"not-a-real-png")
     config = _build_config(tmp_path, max_size_kb=1)
 
-    with pytest.raises(ValueError, match="JPEG"):
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("broken.png"),
+        category=FileCategory.PNG,
+        config=config,
+    )
+
+    assert result.status is FileStatus.FAILED
+    assert result.failure_reason is FailureReason.CORRUPTED_FILE
+    assert result.final_size_bytes is None
+
+
+def test_unsupported_category_still_raises_value_error(tmp_path: Path) -> None:
+    file_path = tmp_path / "image.bin"
+    file_path.write_bytes(b"not-an-image")
+    config = _build_config(tmp_path, max_size_kb=1)
+
+    with pytest.raises(ValueError, match="supports JPEG and PNG"):
         compress_image_file(
             file_path=file_path,
-            relative_path=Path("image.png"),
-            category=FileCategory.PNG,
+            relative_path=Path("image.bin"),
+            category=FileCategory.UNSUPPORTED,
             config=config,
         )
