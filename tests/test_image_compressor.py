@@ -175,6 +175,40 @@ def test_min_jpeg_quality_below_default_allows_more_aggressive_attempts(
     assert min(qualities_seen) <= 20
 
 
+def test_min_jpeg_quality_below_5_is_clamped_without_empty_ladder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    file_path = tmp_path / "quality1.jpg"
+    original_size = _write_jpeg(file_path, size=(1600, 1600), quality=95)
+    config = _build_config(tmp_path, max_size_kb=max(1, (original_size // 1024) - 50))
+    config.min_jpeg_quality = 1
+
+    import zip_compressor.compressors.image_compressor as image_compressor
+
+    qualities_seen: list[int] = []
+    target_size = config.max_size_bytes
+
+    def tracking_encode(image: Image.Image, quality: int) -> bytes:
+        qualities_seen.append(quality)
+        if quality <= 5:
+            return b"x" * max(1, target_size - 1)
+        return b"x" * (target_size + 100)
+
+    monkeypatch.setattr(image_compressor, "_encode_jpeg", tracking_encode)
+
+    result = compress_image_file(
+        file_path=file_path,
+        relative_path=Path("quality1.jpg"),
+        category=FileCategory.JPEG,
+        config=config,
+    )
+
+    assert qualities_seen
+    assert min(qualities_seen) == 5
+    assert result.failure_reason is None
+
+
 def test_min_jpeg_quality_above_95_does_not_report_empty_ladder_as_save_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -222,9 +256,9 @@ def test_write_failure_returns_structured_image_save_error(
         lambda source_image, config: (smaller_candidate, True),
     )
     monkeypatch.setattr(
-        Path,
-        "write_bytes",
-        lambda self, data: (_ for _ in ()).throw(OSError("disk full")),
+        image_compressor,
+        "_atomic_write_bytes",
+        lambda path, data: (_ for _ in ()).throw(OSError("disk full")),
     )
 
     result = compress_image_file(
@@ -244,13 +278,10 @@ def test_non_jpeg_category_returns_unsupported_type_failure(tmp_path: Path) -> N
     file_path.write_bytes(b"png-bytes")
     config = _build_config(tmp_path, max_size_kb=1)
 
-    result = compress_image_file(
-        file_path=file_path,
-        relative_path=Path("image.png"),
-        category=FileCategory.PNG,
-        config=config,
-    )
-
-    assert result.status is FileStatus.FAILED
-    assert result.failure_reason is FailureReason.UNSUPPORTED_TYPE
-    assert result.final_size_bytes is None
+    with pytest.raises(ValueError, match="JPEG"):
+        compress_image_file(
+            file_path=file_path,
+            relative_path=Path("image.png"),
+            category=FileCategory.PNG,
+            config=config,
+        )

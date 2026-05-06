@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import os
+import tempfile
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
@@ -25,17 +27,10 @@ def compress_image_file(
     category: FileCategory,
     config: CompressionConfig,
 ) -> FileProcessResult:
-    original_size = file_path.stat().st_size
     if category is not FileCategory.JPEG:
-        return FileProcessResult(
-            relative_path=relative_path,
-            category=category,
-            status=FileStatus.FAILED,
-            original_size_bytes=original_size,
-            final_size_bytes=None,
-            failure_reason=FailureReason.UNSUPPORTED_TYPE,
-            message=f"unsupported image category: {category.value}",
-        )
+        raise ValueError(f"compress_image_file only supports JPEG inputs, got {category.value}")
+
+    original_size = file_path.stat().st_size
 
     try:
         source_image = _load_image(file_path)
@@ -97,7 +92,7 @@ def compress_image_file(
         )
 
     try:
-        file_path.write_bytes(best_bytes)
+        _atomic_write_bytes(file_path, best_bytes)
     except OSError as exc:
         return FileProcessResult(
             relative_path=relative_path,
@@ -203,3 +198,21 @@ def _encode_jpeg(image: Image.Image, quality: int) -> bytes:
         progressive=True,
     )
     return buffer.getvalue()
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, dir=path.parent) as temp_file:
+            temp_file.write(data)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_path = Path(temp_file.name)
+        temp_path.replace(path)
+    except Exception:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
