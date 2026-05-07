@@ -4,6 +4,7 @@ import pytest
 
 from zip_compressor.compressors.pdf_compressor import (
     GhostscriptPdfCompressor,
+    NoopPdfCompressor,
     build_pdf_compressor,
 )
 from zip_compressor.models import CompressionConfig, FileCategory, FileStatus
@@ -116,7 +117,7 @@ def test_pdf_force_jpg_single_page(tmp_path: Path):
     assert not pdf_path.exists()
 
 
-def test_pdf_force_jpg_skips_when_ghostscript_unavailable(tmp_path: Path):
+def test_pdf_force_jpg_skips_when_ghostscript_unavailable(tmp_path: Path, monkeypatch):
     """When ghostscript is not available, force_jpg should still use NoopPdfCompressor."""
     config = CompressionConfig(
         input_zip=tmp_path / "in.zip",
@@ -125,14 +126,16 @@ def test_pdf_force_jpg_skips_when_ghostscript_unavailable(tmp_path: Path):
         force_jpg=True,  # But also request JPG conversion
         max_size_kb=2000,
     )
-    # Force to NoopPdfCompressor by manually constructing it with no executable
-    compressor = GhostscriptPdfCompressor(config, executable="nonexistent_gs")
+    import zip_compressor.compressors.pdf_compressor as pdf_compressor
+
+    monkeypatch.setattr(pdf_compressor, "detect_ghostscript", lambda: None)
+    compressor = build_pdf_compressor(config)
     pdf_path = _create_multipage_pdf(tmp_path)
     relative_path = Path("test.pdf")
 
     result = compressor.compress(pdf_path, relative_path)
 
-    # NoopPdfCompressor returns FAILED with PDF_STRATEGY_UNAVAILABLE
+    assert isinstance(compressor, NoopPdfCompressor)
     assert result.status == FileStatus.FAILED
     assert result.category == FileCategory.PDF
     assert result.failure_reason is not None

@@ -1,6 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+
+DEFAULT_MAX_SIZE_KB = 2000
+DEFAULT_MIN_IMAGE_SIDE = 800
+DEFAULT_MIN_JPEG_QUALITY = 35
 
 
 class FileCategory(str, Enum):
@@ -24,8 +28,10 @@ class FailureReason(str, Enum):
     IMAGE_OPEN_FAILED = "image_open_failed"
     IMAGE_SAVE_FAILED = "image_save_failed"
     IMAGE_CANNOT_REACH_TARGET = "image_cannot_reach_target"
+    PDF_STRATEGY_DISABLED = "pdf_strategy_disabled"
     PDF_STRATEGY_UNAVAILABLE = "pdf_strategy_unavailable"
     PDF_COMPRESSION_FAILED = "pdf_compression_failed"
+    PDF_CANNOT_REACH_TARGET = "pdf_cannot_reach_target"
     ZIP_EXTRACT_ERROR = "zip_extract_error"
     ZIP_PACK_ERROR = "zip_pack_error"
     UNEXPECTED_ERROR = "unexpected_error"
@@ -35,12 +41,12 @@ class FailureReason(str, Enum):
 class CompressionConfig:
     input_zip: Path
     output_zip: Path
-    max_size_kb: int = 2000
+    max_size_kb: int = DEFAULT_MAX_SIZE_KB
     png_allow_jpg: bool = False
     pdf_strategy: str = "none"
     log_file: Path | None = None
-    min_image_side: int = 800
-    min_jpeg_quality: int = 35
+    min_image_side: int = DEFAULT_MIN_IMAGE_SIDE
+    min_jpeg_quality: int = DEFAULT_MIN_JPEG_QUALITY
     force_jpg: bool = False
 
     @property
@@ -66,6 +72,17 @@ class FileProcessResult:
     failure_reason: FailureReason | None
     message: str
 
+    def __post_init__(self) -> None:
+        if self.original_size_bytes < 0:
+            raise ValueError("original_size_bytes must be non-negative")
+        if self.final_size_bytes is not None and self.final_size_bytes < 0:
+            raise ValueError("final_size_bytes must be non-negative")
+        if self.status is FileStatus.FAILED:
+            if self.final_size_bytes is not None:
+                raise ValueError("failed results must not define final_size_bytes")
+            if self.failure_reason is None:
+                raise ValueError("failed results must include failure_reason")
+
     @property
     def reached_target(self) -> bool:
         return self.status in {
@@ -87,7 +104,7 @@ class RunSummary:
     compressed_but_above_target: int
     skipped_unsupported: int
     failed_files: int
-    failures: list[FileProcessResult]
+    failures: list[FileProcessResult] = field(default_factory=list)
 
 
 @dataclass(slots=True)

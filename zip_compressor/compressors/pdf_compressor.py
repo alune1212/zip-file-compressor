@@ -1,16 +1,53 @@
-from dataclasses import dataclass
-from pathlib import Path
+from __future__ import annotations
+
+import os
 import shutil
 import subprocess
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 
-from ..models import CompressionConfig, FailureReason, FileCategory, FileProcessResult, FileStatus
+from zip_compressor.models import (
+    CompressionConfig,
+    FailureReason,
+    FileCategory,
+    FileProcessResult,
+    FileStatus,
+)
 
-GS_PDF_SETTINGS = ["/printer", "/ebook", "/screen"]
+_GHOSTSCRIPT_COMMANDS = ("gswin64c", "gswin32c", "gs")
+_PDFSETTINGS_PRESETS = ("/printer", "/ebook", "/screen")
+
+
+def detect_ghostscript() -> str | None:
+    for command in _GHOSTSCRIPT_COMMANDS:
+        resolved = shutil.which(command)
+        if resolved:
+            return resolved
+    return None
+
+
+def build_pdf_compressor(config: CompressionConfig) -> NoopPdfCompressor | GhostscriptPdfCompressor:
+    if config.pdf_strategy != "ghostscript":
+        return NoopPdfCompressor(
+            failure_reason=FailureReason.PDF_STRATEGY_DISABLED,
+            message="pdf compression strategy is disabled",
+        )
+
+    executable = detect_ghostscript()
+    if executable is None:
+        return NoopPdfCompressor(
+            failure_reason=FailureReason.PDF_STRATEGY_UNAVAILABLE,
+            message="ghostscript requested but no executable was detected",
+        )
+
+    return GhostscriptPdfCompressor(config=config, executable=executable)
 
 
 @dataclass(slots=True)
 class NoopPdfCompressor:
-    config: CompressionConfig
+    failure_reason: FailureReason = FailureReason.PDF_STRATEGY_DISABLED
+    message: str = "pdf compression strategy is disabled"
 
     def compress(self, file_path: Path, relative_path: Path) -> FileProcessResult:
         original_size = file_path.stat().st_size
@@ -20,8 +57,8 @@ class NoopPdfCompressor:
             status=FileStatus.FAILED,
             original_size_bytes=original_size,
             final_size_bytes=None,
-            failure_reason=FailureReason.PDF_STRATEGY_UNAVAILABLE,
-            message="No PDF compression strategy is enabled.",
+            failure_reason=self.failure_reason,
+            message=self.message,
         )
 
 
@@ -32,121 +69,183 @@ class GhostscriptPdfCompressor:
 
     def compress(self, file_path: Path, relative_path: Path) -> FileProcessResult:
         original_size = file_path.stat().st_size
-
-        # Handle force_jpg=True: convert PDF pages to JPEG images
-        if self.config.force_jpg:
-            return self._convert_pdf_to_jpg(file_path, relative_path, original_size)
-
         if original_size <= self.config.max_size_bytes:
-            return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.ALREADY_WITHIN_TARGET, original_size, original_size, None, "already within target")
-        settings = GS_PDF_SETTINGS
-        best_size = original_size
-        best_output: bytes | None = None
-        for setting in settings:
-            candidate_path = file_path.with_suffix(".candidate.pdf")
-            command = [
-                self.executable,
-                "-sDEVICE=pdfwrite",
-                "-dCompatibilityLevel=1.4",
-                f"-dPDFSETTINGS={setting}",
-                "-dNOPAUSE",
-                "-dBATCH",
-                "-dQUIET",
-                f"-sOutputFile={candidate_path}",
-                str(file_path),
-            ]
-            try:
-                subprocess.run(command, check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError:
-                continue  # Try next setting instead of failing entirely
-            candidate_size = candidate_path.stat().st_size
-            candidate_bytes = candidate_path.read_bytes()
-            candidate_path.unlink(missing_ok=True)
-            if candidate_size < best_size:
-                best_size = candidate_size
-                best_output = candidate_bytes
-            if candidate_size <= self.config.max_size_bytes:
-                file_path.write_bytes(candidate_bytes)
-                return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.COMPRESSED_TO_TARGET, original_size, candidate_size, None, f"compressed with {setting}")
-        if best_output is not None:
-            file_path.write_bytes(best_output)
-            return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.COMPRESSED_BUT_ABOVE_TARGET, original_size, best_size, FailureReason.PDF_COMPRESSION_FAILED, "best effort PDF compression did not reach target")
-        return FileProcessResult(relative_path, FileCategory.PDF, FileStatus.FAILED, original_size, None, FailureReason.PDF_COMPRESSION_FAILED, "no PDF output produced")
+            return FileProcessResult(
+                relative_path=relative_path,
+                category=FileCategory.PDF,
+                status=FileStatus.ALREADY_WITHIN_TARGET,
+                original_size_bytes=original_size,
+                final_size_bytes=original_size,
+                failure_reason=None,
+                message="pdf already within target size",
+            )
 
-    def _convert_pdf_to_jpg(self, file_path: Path, relative_path: Path, original_size: int) -> FileProcessResult:
-        """Convert PDF pages to JPEG images using Ghostscript."""
-        stem = file_path.stem
-        output_pattern = file_path.parent / f"{stem}_page_%d.jpg"
-        command = [
-            self.executable,
-            "-dNOPAUSE",
-            "-dBATCH",
-            "-sDEVICE=jpeg",
-            "-r150",
-            "-dJPEGQ=85",
-            f"-sOutputFile={output_pattern}",
-            str(file_path),
-        ]
+        best_bytes: bytes | None = None
+        best_preset: str | None = None
+        reached_target = False
+
+        for preset in _PDFSETTINGS_PRESETS:
+            result = self._run_ghostscript(file_path, preset)
+            if result.failure_message is not None:
+                return FileProcessResult(
+                    relative_path=relative_path,
+                    category=FileCategory.PDF,
+                    status=FileStatus.FAILED,
+                    original_size_bytes=original_size,
+                    final_size_bytes=None,
+                    failure_reason=FailureReason.PDF_COMPRESSION_FAILED,
+                    message=result.failure_message,
+                )
+
+            if result.returncode != 0:
+                return FileProcessResult(
+                    relative_path=relative_path,
+                    category=FileCategory.PDF,
+                    status=FileStatus.FAILED,
+                    original_size_bytes=original_size,
+                    final_size_bytes=None,
+                    failure_reason=FailureReason.PDF_COMPRESSION_FAILED,
+                    message=f"ghostscript failed for {preset}: {result.stderr.strip() or result.stdout.strip() or 'unknown error'}",
+                )
+
+            if result.output_bytes is None:
+                return FileProcessResult(
+                    relative_path=relative_path,
+                    category=FileCategory.PDF,
+                    status=FileStatus.FAILED,
+                    original_size_bytes=original_size,
+                    final_size_bytes=None,
+                    failure_reason=FailureReason.PDF_COMPRESSION_FAILED,
+                    message=f"ghostscript did not produce output for {preset}",
+                )
+
+            candidate_bytes = result.output_bytes
+            if best_bytes is None or len(candidate_bytes) < len(best_bytes):
+                best_bytes = candidate_bytes
+                best_preset = preset
+                reached_target = len(candidate_bytes) <= self.config.max_size_bytes
+
+            if reached_target:
+                break
+
+        if best_bytes is None or len(best_bytes) >= original_size:
+            return FileProcessResult(
+                relative_path=relative_path,
+                category=FileCategory.PDF,
+                status=FileStatus.FAILED,
+                original_size_bytes=original_size,
+                final_size_bytes=None,
+                failure_reason=FailureReason.PDF_COMPRESSION_FAILED,
+                message="ghostscript did not produce a smaller pdf",
+            )
+
         try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            # Clean up any orphaned JPG files that gs might have produced
-            for orphaned in file_path.parent.glob(f"{stem}_page_*.jpg"):
-                orphaned.unlink(missing_ok=True)
+            _atomic_write_bytes(file_path, best_bytes)
+        except OSError as exc:
             return FileProcessResult(
-                relative_path,
-                FileCategory.PDF,
-                FileStatus.FAILED,
-                original_size,
-                None,
-                FailureReason.PDF_COMPRESSION_FAILED,
-                "ghostscript failed to convert PDF to JPG",
+                relative_path=relative_path,
+                category=FileCategory.PDF,
+                status=FileStatus.FAILED,
+                original_size_bytes=original_size,
+                final_size_bytes=None,
+                failure_reason=FailureReason.PDF_COMPRESSION_FAILED,
+                message=f"failed to write compressed pdf: {exc}",
             )
 
-        # Find generated JPG files
-        jpg_files = sorted(file_path.parent.glob(f"{stem}_page_*.jpg"))
-        if not jpg_files:
+        final_size = len(best_bytes)
+
+        if final_size <= self.config.max_size_bytes:
             return FileProcessResult(
-                relative_path,
-                FileCategory.PDF,
-                FileStatus.FAILED,
-                original_size,
-                None,
-                FailureReason.PDF_COMPRESSION_FAILED,
-                "no JPG files produced from PDF",
+                relative_path=relative_path,
+                category=FileCategory.PDF,
+                status=FileStatus.COMPRESSED_TO_TARGET,
+                original_size_bytes=original_size,
+                final_size_bytes=final_size,
+                failure_reason=None,
+                message=f"pdf compressed to target using {best_preset}",
             )
 
-        # Calculate total size of all JPG files
-        total_jpg_size = sum(f.stat().st_size for f in jpg_files)
-        first_jpg_relative = relative_path.parent / jpg_files[0].name
-
-        result = FileProcessResult(
-            first_jpg_relative,
-            FileCategory.JPEG,
-            FileStatus.COMPRESSED_TO_TARGET,
-            original_size,
-            total_jpg_size,
-            None,
-            f"PDF converted to {len(jpg_files)} JPG pages",
+        return FileProcessResult(
+            relative_path=relative_path,
+            category=FileCategory.PDF,
+            status=FileStatus.COMPRESSED_BUT_ABOVE_TARGET,
+            original_size_bytes=original_size,
+            final_size_bytes=final_size,
+            failure_reason=FailureReason.PDF_CANNOT_REACH_TARGET,
+            message=f"pdf compressed but remained above target using {best_preset}",
         )
 
-        # Delete original PDF only after confirming conversion was successful
-        file_path.unlink(missing_ok=True)
+    def _run_ghostscript(self, file_path: Path, preset: str) -> _GhostscriptRunResult:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / file_path.name
+            try:
+                completed = subprocess.run(
+                    [
+                        self.executable,
+                        "-sDEVICE=pdfwrite",
+                        "-dCompatibilityLevel=1.4",
+                        "-dNOPAUSE",
+                        "-dQUIET",
+                        "-dBATCH",
+                        f"-dPDFSETTINGS={preset}",
+                        f"-sOutputFile={output_path}",
+                        str(file_path),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+            except OSError as exc:
+                return _GhostscriptRunResult(
+                    returncode=None,
+                    stdout="",
+                    stderr="",
+                    output_bytes=None,
+                    failure_message=f"failed to launch ghostscript for {preset}: {exc}",
+                )
 
-        return result
+            try:
+                output_bytes = output_path.read_bytes() if output_path.exists() else None
+            except OSError as exc:
+                return _GhostscriptRunResult(
+                    returncode=completed.returncode,
+                    stdout=completed.stdout,
+                    stderr=completed.stderr,
+                    output_bytes=None,
+                    failure_message=f"failed to read ghostscript output for {preset}: {exc}",
+                )
+
+        return _GhostscriptRunResult(
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            output_bytes=output_bytes,
+            failure_message=None,
+        )
 
 
-def detect_ghostscript() -> str | None:
-    for command in ("gswin64c", "gswin32c", "gs"):
-        if shutil.which(command):
-            return command
-    return None
+@dataclass(slots=True)
+class _GhostscriptRunResult:
+    returncode: int | None
+    stdout: str
+    stderr: str
+    output_bytes: bytes | None
+    failure_message: str | None = None
 
 
-def build_pdf_compressor(config: CompressionConfig) -> NoopPdfCompressor | GhostscriptPdfCompressor:
-    if config.pdf_strategy != "ghostscript":
-        return NoopPdfCompressor(config)
-    executable = detect_ghostscript()
-    if executable is None:
-        return NoopPdfCompressor(config)
-    return GhostscriptPdfCompressor(config, executable)
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, dir=path.parent) as temp_file:
+            temp_file.write(data)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_path = Path(temp_file.name)
+        temp_path.replace(path)
+    except Exception:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise

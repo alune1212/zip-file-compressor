@@ -1,6 +1,7 @@
+import os
 from pathlib import Path
 
-from .models import DiscoveredFile, FileCategory
+from zip_compressor.models import DiscoveredFile, FileCategory
 
 
 def categorize_file(path: Path) -> FileCategory:
@@ -15,16 +16,25 @@ def categorize_file(path: Path) -> FileCategory:
 
 
 def scan_files(root_dir: Path) -> list[DiscoveredFile]:
+    root_dir = root_dir.resolve()
     discovered: list[DiscoveredFile] = []
-    for path in sorted(root_dir.rglob("*")):
-        if not path.is_file():
-            continue
-        discovered.append(
-            DiscoveredFile(
-                absolute_path=path,
-                relative_path=path.relative_to(root_dir),
-                category=categorize_file(path),
-                size_bytes=path.stat().st_size,
+    for current_dir, dirs, files in os.walk(root_dir, topdown=True, followlinks=False):
+        current_path = Path(current_dir)
+        dirs[:] = [
+            directory_name
+            for directory_name in sorted(dirs)
+            if not (current_path / directory_name).is_symlink()
+        ]
+        for file_name in sorted(files):
+            file_path = current_path / file_name
+            if file_path.is_symlink() or not file_path.is_file():
+                continue
+            discovered.append(
+                DiscoveredFile(
+                    absolute_path=file_path.resolve(),
+                    relative_path=file_path.relative_to(root_dir),
+                    category=categorize_file(file_path),
+                    size_bytes=file_path.stat().st_size,
+                )
             )
-        )
     return discovered

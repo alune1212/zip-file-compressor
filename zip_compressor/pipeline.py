@@ -1,99 +1,110 @@
-import argparse
+from __future__ import annotations
+
+from dataclasses import replace
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from .archive import create_zip_from_directory, extract_zip_to_directory
-from .compressors.image_compressor import compress_image_file
-from .compressors.pdf_compressor import build_pdf_compressor
-from .models import CompressionConfig, FailureReason, FileCategory, FileProcessResult, FileStatus, PipelineResult
-from .reporter import build_summary, configure_logging
-from .scanner import scan_files
+from zip_compressor.archive import create_zip_from_directory, extract_zip_to_directory
+from zip_compressor.compressors.image_compressor import compress_image_file
+from zip_compressor.compressors.pdf_compressor import build_pdf_compressor
+from zip_compressor.models import (
+    CompressionConfig,
+    DiscoveredFile,
+    FailureReason,
+    FileCategory,
+    FileProcessResult,
+    FileStatus,
+    PipelineResult,
+)
+from zip_compressor.reporter import build_summary
+from zip_compressor.scanner import scan_files
+
+logger = logging.getLogger(__name__)
 
 
 def run_pipeline(config: CompressionConfig) -> PipelineResult:
     results: list[FileProcessResult] = []
-    pdf_compressor = build_pdf_compressor(config)
 
     with TemporaryDirectory(prefix="zip-compressor-") as temp_dir:
         working_dir = Path(temp_dir)
         extract_zip_to_directory(config.input_zip, working_dir)
+        pdf_compressor = build_pdf_compressor(config)
 
-        for discovered in scan_files(working_dir):
-            logging.info("Processing %s", discovered.relative_path.as_posix())
-            if discovered.category is FileCategory.UNSUPPORTED:
-                results.append(
-                    FileProcessResult(
-                        relative_path=discovered.relative_path,
-                        category=discovered.category,
-                        status=FileStatus.SKIPPED_UNSUPPORTED,
-                        original_size_bytes=discovered.size_bytes,
-                        final_size_bytes=discovered.size_bytes,
-                        failure_reason=FailureReason.UNSUPPORTED_TYPE,
-                        message="unsupported file type",
-                    )
-                )
-                continue
-
-            try:
-                if discovered.category in {FileCategory.JPEG, FileCategory.PNG}:
-                    result = compress_image_file(discovered.absolute_path, discovered.relative_path, discovered.category, config)
-                else:
-                    result = pdf_compressor.compress(discovered.absolute_path, discovered.relative_path)
-                results.append(result)
-            except Exception as exc:
-                results.append(
-                    FileProcessResult(
-                        relative_path=discovered.relative_path,
-                        category=discovered.category,
-                        status=FileStatus.FAILED,
-                        original_size_bytes=discovered.size_bytes,
-                        final_size_bytes=None,
-                        failure_reason=FailureReason.UNEXPECTED_ERROR,
-                        message=str(exc),
-                    )
-                )
+        for discovered_file in scan_files(working_dir):
+            logger.info("processing %s", discovered_file.relative_path.as_posix())
+            results.append(_process_discovered_file(discovered_file, config, pdf_compressor))
 
         create_zip_from_directory(working_dir, config.output_zip)
 
-    summary = build_summary(results)
-    return PipelineResult(summary=summary, results=results)
+    return PipelineResult(summary=build_summary(results), results=results)
 
 
-def build_argument_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compress supported files inside a ZIP archive.")
-    parser.add_argument("--input", required=True, dest="input_zip", type=Path)
-    parser.add_argument("--output", required=True, dest="output_zip", type=Path)
-    parser.add_argument("--max-size-kb", type=int, default=2000)
-    parser.add_argument("--png-allow-jpg", action="store_true")
-    parser.add_argument("--pdf-strategy", choices=["none", "ghostscript"], default="none")
-    parser.add_argument("--log-file", type=Path)
-    parser.add_argument("--min-image-side", type=int, default=800)
-    parser.add_argument("--min-jpeg-quality", type=int, default=35)
-    parser.add_argument("--force-jpg", action="store_true")
-    return parser
+def _process_discovered_file(
+    discovered_file: DiscoveredFile,
+    config: CompressionConfig,
+    pdf_compressor,
+) -> FileProcessResult:
+    if discovered_file.category is FileCategory.UNSUPPORTED:
+        return FileProcessResult(
+            relative_path=discovered_file.relative_path,
+            category=discovered_file.category,
+            status=FileStatus.SKIPPED_UNSUPPORTED,
+            original_size_bytes=discovered_file.size_bytes,
+            final_size_bytes=discovered_file.size_bytes,
+            failure_reason=FailureReason.UNSUPPORTED_TYPE,
+            message="unsupported file type",
+        )
 
+    try:
+        if discovered_file.category in {FileCategory.JPEG, FileCategory.PNG}:
+            return compress_image_file(
+                discovered_file.absolute_path,
+                discovered_file.relative_path,
+                discovered_file.category,
+                _config_for_image_file(discovered_file, config),
+            )
+        if discovered_file.category is FileCategory.PDF:
+            return pdf_compressor.compress(
+                discovered_file.absolute_path,
+                discovered_file.relative_path,
+            )
+    except Exception as exc:
+        return FileProcessResult(
+            relative_path=discovered_file.relative_path,
+            category=discovered_file.category,
+            status=FileStatus.FAILED,
+            original_size_bytes=discovered_file.size_bytes,
+            final_size_bytes=None,
+            failure_reason=FailureReason.UNEXPECTED_ERROR,
+            message=str(exc),
+        )
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_argument_parser()
-    args = parser.parse_args(argv)
-    config = CompressionConfig(
-        input_zip=args.input_zip,
-        output_zip=args.output_zip,
-        max_size_kb=args.max_size_kb,
-        png_allow_jpg=args.png_allow_jpg,
-        pdf_strategy=args.pdf_strategy,
-        log_file=args.log_file,
-        min_image_side=args.min_image_side,
-        min_jpeg_quality=args.min_jpeg_quality,
-        force_jpg=args.force_jpg,
+    return FileProcessResult(
+        relative_path=discovered_file.relative_path,
+        category=discovered_file.category,
+        status=FileStatus.FAILED,
+        original_size_bytes=discovered_file.size_bytes,
+        final_size_bytes=None,
+        failure_reason=FailureReason.UNEXPECTED_ERROR,
+        message=f"no processor for category {discovered_file.category.value}",
     )
-    configure_logging(config.log_file)
-    pipeline_result = run_pipeline(config)
-    logging.info("Total files: %s", pipeline_result.summary.total_files)
-    logging.info("Compressed to target: %s", pipeline_result.summary.compressed_to_target)
-    logging.info("Already within target: %s", pipeline_result.summary.already_within_target)
-    logging.info("Failed files: %s", pipeline_result.summary.failed_files)
-    for failure in pipeline_result.summary.failures:
-        logging.info("Failure: %s -> %s", failure.relative_path.as_posix(), failure.message)
-    return 0 if pipeline_result.summary.failed_files == 0 else 1
+
+
+def _config_for_image_file(
+    discovered_file: DiscoveredFile,
+    config: CompressionConfig,
+) -> CompressionConfig:
+    if discovered_file.category is not FileCategory.PNG or not config.png_allow_jpg:
+        return config
+
+    jpeg_target = discovered_file.absolute_path.with_suffix(".jpg")
+    if not jpeg_target.exists() or jpeg_target == discovered_file.absolute_path:
+        return config
+
+    logger.warning(
+        "disabled PNG to JPG conversion for %s because %s already exists",
+        discovered_file.relative_path.as_posix(),
+        discovered_file.relative_path.with_suffix(".jpg").as_posix(),
+    )
+    return replace(config, png_allow_jpg=False)
