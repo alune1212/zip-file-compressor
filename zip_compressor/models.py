@@ -2,6 +2,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+DEFAULT_MAX_SIZE_KB = 2000
+DEFAULT_MIN_IMAGE_SIDE = 800
+DEFAULT_MIN_JPEG_QUALITY = 35
+
 
 class FileCategory(str, Enum):
     PDF = "pdf"
@@ -37,12 +41,12 @@ class FailureReason(str, Enum):
 class CompressionConfig:
     input_zip: Path
     output_zip: Path
-    max_size_kb: int = 2000
+    max_size_kb: int = DEFAULT_MAX_SIZE_KB
     png_allow_jpg: bool = False
     pdf_strategy: str = "none"
     log_file: Path | None = None
-    min_image_side: int = 800
-    min_jpeg_quality: int = 35
+    min_image_side: int = DEFAULT_MIN_IMAGE_SIDE
+    min_jpeg_quality: int = DEFAULT_MIN_JPEG_QUALITY
 
     @property
     def max_size_bytes(self) -> int:

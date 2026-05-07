@@ -53,15 +53,16 @@ def test_file_process_result_flags_non_skipped_states() -> None:
     assert result.failure_reason is FailureReason.PDF_STRATEGY_UNAVAILABLE
 
 
-def test_module_entrypoint_runs_without_import_error() -> None:
+def test_module_entrypoint_help_runs_without_import_error() -> None:
     completed = subprocess.run(
-        [sys.executable, "-m", "zip_compressor"],
+        [sys.executable, "-m", "zip_compressor", "--help"],
         check=False,
         capture_output=True,
         cwd=ROOT,
         text=True,
     )
     assert completed.returncode == 0
+    assert "--input" in completed.stdout
 
 
 def test_file_process_result_rejects_failed_status_with_final_size() -> None:
