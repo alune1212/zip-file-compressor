@@ -100,3 +100,9 @@ class RunSummary:
     skipped_unsupported: int
     failed_files: int
     failures: list[FileProcessResult] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class PipelineResult:
+    summary: RunSummary
+    results: list[FileProcessResult]
