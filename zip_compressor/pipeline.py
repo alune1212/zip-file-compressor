@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -61,7 +62,7 @@ def _process_discovered_file(
                 discovered_file.absolute_path,
                 discovered_file.relative_path,
                 discovered_file.category,
-                config,
+                _config_for_image_file(discovered_file, config),
             )
         if discovered_file.category is FileCategory.PDF:
             return pdf_compressor.compress(
@@ -88,3 +89,22 @@ def _process_discovered_file(
         failure_reason=FailureReason.UNEXPECTED_ERROR,
         message=f"no processor for category {discovered_file.category.value}",
     )
+
+
+def _config_for_image_file(
+    discovered_file: DiscoveredFile,
+    config: CompressionConfig,
+) -> CompressionConfig:
+    if discovered_file.category is not FileCategory.PNG or not config.png_allow_jpg:
+        return config
+
+    jpeg_target = discovered_file.absolute_path.with_suffix(".jpg")
+    if not jpeg_target.exists() or jpeg_target == discovered_file.absolute_path:
+        return config
+
+    logger.warning(
+        "disabled PNG to JPG conversion for %s because %s already exists",
+        discovered_file.relative_path.as_posix(),
+        discovered_file.relative_path.with_suffix(".jpg").as_posix(),
+    )
+    return replace(config, png_allow_jpg=False)
