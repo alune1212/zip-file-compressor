@@ -40,8 +40,8 @@ zip-file-compressor/
 - ZIP：解压到临时目录，处理后重新打包，保留原始目录结构，执行结束自动清理临时目录。
 - JPG/JPEG：循环尝试质量和缩放参数，使用 Pillow 的 `optimize` 重新编码，直到达到目标大小或触及质量/分辨率阈值。
 - PNG：优先 PNG 重新编码和缩放；可通过 `--png-allow-jpg` 允许非透明 PNG 转 JPG。若同目录已有同名 `.jpg`，会自动禁用该 PNG 的转 JPG，避免覆盖文件。
-- 强制 JPG：可通过 `--force-jpg` 对需要处理的 PNG 强制输出 JPG；遇到同名 JPG 时会生成唯一文件名，避免覆盖原文件。
-- PDF：默认不启用压缩策略；使用 `--pdf-strategy ghostscript` 后调用本机 Ghostscript，按 `/printer`、`/ebook`、`/screen` 多档参数循环尝试。
+- 强制 JPG：可通过 `--force-jpg` 对需要处理的 PNG 强制输出 JPG；遇到同名 JPG 时会生成唯一文件名，避免覆盖原文件。当前实现不会把 PDF 转成 JPG，也不会把已有 `.jpeg` 统一改名为 `.jpg`。
+- PDF：默认不启用压缩策略；使用 `--pdf-strategy ghostscript` 后调用本机 Ghostscript，按 `/printer`、`/ebook`、`/screen` 多档参数循环尝试压缩 PDF。
 - 异常处理：不支持类型会跳过并记录；损坏文件或单文件压缩失败不会中断整个 ZIP 任务，会进入失败清单。
 
 ## 安装
@@ -95,7 +95,7 @@ python main.py \
 - `--output`：输出 ZIP 文件路径，必填。
 - `--max-size-kb`：单文件目标大小，默认 `2000`。
 - `--png-allow-jpg`：允许无透明通道 PNG 在必要时转为 JPG，默认不允许。
-- `--force-jpg`：强制需要处理的 PNG 输出为 JPG，默认不启用。
+- `--force-jpg`：强制需要处理的 PNG 输出为 JPG，默认不启用；不覆盖 PDF 转 JPG。
 - `--pdf-strategy`：PDF 压缩策略，支持 `none`、`ghostscript`，默认 `none`。
 - `--log-file`：可选日志文件路径，日志使用 UTF-8。
 - `--min-image-side`：图片缩放后的最小边长，默认 `800`。
@@ -104,6 +104,8 @@ python main.py \
 ## Ghostscript
 
 PDF 压缩依赖本机 Ghostscript。未安装或未启用时，PDF 文件会记录为失败项，但不会中断 ZIP 中其他文件处理。
+
+当前仓库内的 Ghostscript 路径只做 PDF 压缩，不做 PDF 页面渲染到 JPG。若业务要求“输入 ZIP 内的 PDF 全部输出为 JPG”，需要先安装并实现 PDF 渲染策略，或使用仓库外工具链单独转换后再打包。
 
 Windows 安装方式：
 
@@ -147,8 +149,10 @@ CLI 会输出汇总：
 
 ## 测试
 
+如果使用现有虚拟环境：
+
 ```bash
-pytest
+.venv/bin/python -m pytest -q
 ```
 
 如果使用 uv：
@@ -156,3 +160,5 @@ pytest
 ```bash
 uv run pytest -q
 ```
+
+2026-05-08 在当前 checkout 验证结果：`.venv/bin/python -m pytest -q` -> `62 passed, 2 skipped`。2 个 skipped 测试依赖本机 Ghostscript。

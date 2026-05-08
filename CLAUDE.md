@@ -13,7 +13,10 @@ ZIP File Compressor - A CLI tool that extracts ZIP archives, compresses PDF/JPG/
 uv venv && uv pip install -r requirements.txt
 
 # Run tests (2 PDF tests skip if ghostscript not installed)
-PYTHONPATH=. uv run pytest
+.venv/bin/python -m pytest -q
+
+# Alternative when uv cache is writable
+PYTHONPATH=. uv run pytest -q
 
 # Run single test file
 PYTHONPATH=. uv run pytest tests/test_models.py -v
@@ -52,9 +55,9 @@ zip_compressor/
 - Optional PNG→JPEG conversion when `png_allow_jpg=True` and no transparency
 
 **PDF Compression:**
-- `NoopPdfCompressor` - Always fails (when `--pdf-strategy none`)
+- `NoopPdfCompressor` - Fails with `pdf_strategy_disabled` or `pdf_strategy_unavailable`
 - `GhostscriptPdfCompressor` - Uses Ghostscript with /printer, /ebook, /screen settings (requires `gs` installed separately)
-- Ghostscript PDF→JPG conversion: `-sDEVICE=jpeg -r150 -dJPEGQ=85 -sOutputFile={stem}_page_%d.jpg`
+- Current live code uses Ghostscript `pdfwrite` for PDF compression only. Do not assume `--force-jpg` converts PDFs to JPG unless `zip_compressor/compressors/pdf_compressor.py` is changed and tested.
 
 ## Exit Codes
 
@@ -65,11 +68,13 @@ zip_compressor/
 
 - `FileCategory`: PDF, JPEG, PNG, UNSUPPORTED
 - `FileStatus`: ALREADY_WITHIN_TARGET, COMPRESSED_TO_TARGET, COMPRESSED_BUT_ABOVE_TARGET, SKIPPED_UNSUPPORTED, FAILED (NOTE: `SUCCESS` does not exist)
-- `FailureReason`: Various failure reasons for each operation type
-- `CompressionConfig`: All user-configurable parameters (max_size_kb, png_allow_jpg, pdf_strategy, min_image_side, min_jpeg_quality, etc.)
+- `FailureReason`: Various failure reasons for each operation type, including separate disabled/unavailable/cannot-reach-target PDF reasons
+- `CompressionConfig`: All user-configurable parameters (max_size_kb, png_allow_jpg, force_jpg, pdf_strategy, min_image_side, min_jpeg_quality, etc.)
 - `PipelineResult`: Contains `RunSummary` and list of `FileProcessResult` per file
 
 ## Gotchas
 
 - **Ghostscript 为 PDF 压缩必需**: `gs` 必须单独安装 (macOS: `brew install ghostscript`)
 - **PNG→JPEG 转换为有损转换**: 当 `png_allow_jpg=True` 时，透明度会被丢弃
+- **`--force-jpg` 不是 all-JPG 保证**: 当前只强制 PNG 输出 JPG；PDF 仍需要 Ghostscript 压缩策略，已有 `.jpeg` 不会统一重命名为 `.jpg`。
+- **本机交付 fallback 不属于仓库能力**: 2026-05-06/2026-05-08 曾用 macOS `/usr/bin/sips` 在仓库外把单页 PDF ZIP 转为全 JPG ZIP；这只是人工交付路径，代码里没有 `sips` fallback。
